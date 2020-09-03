@@ -37,7 +37,6 @@ exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}')
         first_name: first_name, 
         last_name: last_name,
         phone: phone, 
-        industry: "Food stores",
         address: {
           city: "North Miami Beach",
           country: "US",
@@ -51,8 +50,7 @@ exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}')
           month: 11,
           year: 1996
         },
-        last4: "6711",
-      },    
+      }, 
       capabilities: {
         card_payments: {requested: true},
         transfers: {requested: true},
@@ -62,6 +60,14 @@ exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}')
         ip: "73.125.224.214",
       },
     });
+
+    const bankAccount = await stripe.accounts.createExternalAccount(
+      account.id,
+      {
+        external_account: 'btok_1HMxViLjpR7kl7iGMwPfsDaR',
+      }
+    );
+    return;
    } catch (error) { 
     await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
     await reportError(error, { user: context.params.userId });
