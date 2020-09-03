@@ -23,32 +23,32 @@ admin.initializeApp();
 
 exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}').onCreate(async (snap, context) => {
 
-  const userId = snap.id; 
-  const { first_name, last_name, email_address, phone } = snap.data();
+  const { first_name, last_name, email_address, dob,
+     city, line1, postal_code, state, phone } = snap.data();
 
   try {
     const account = await stripe.accounts.create({
       type: 'custom',
       country: 'US',
       email: email_address,
-      business_type: "individual",
+      business_type: 'individual',
       individual: {
         email: email_address,
         first_name: first_name, 
         last_name: last_name,
         phone: phone, 
         address: {
-          city: "North Miami Beach",
-          country: "US",
-          line1: "14212 Northeast 3rd Avenue",
+          city: city,
+          country: 'US',
+          line1: line1,
           line2: null,
-          postal_code: "33161",
-          state: "FL"
+          postal_code: postal_code,
+          state: state
         },
         dob: {
-          day: 18,
-          month: 11,
-          year: 1996
+          day: dob[0],
+          month: dob[1],
+          year: dob[2]
         },
       }, 
       capabilities: {
@@ -57,22 +57,30 @@ exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}')
       },
       tos_acceptance: {
         date: Math.floor(Date.now() / 1000),
-        ip: "73.125.224.214",
+        ip: '73.125.224.214',
       },
     });
-
-    const bankAccount = await stripe.accounts.createExternalAccount(
-      account.id,
-      {
-        external_account: 'btok_1HMxViLjpR7kl7iGMwPfsDaR',
-      }
-    );
-    return;
+    await snap.ref.collection('stripe').doc('account').set({account_id: account.id}, { merge: true}); 
    } catch (error) { 
     await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
     await reportError(error, { user: context.params.userId });
    }
 });
+
+
+// exports.createExternalAccount = functions.auth.user().onCreate(async (user) => {
+
+
+
+// }
+
+
+    // const bankAccount = await stripe.accounts.createExternalAccount(
+    //   account.id,
+    //   {
+    //     external_account: 'btok_1HMxViLjpR7kl7iGMwPfsDaR',
+    //   }
+    // );
 
 
 exports.createStripeCustomer = functions.auth.user().onCreate(async (user) => {
