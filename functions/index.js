@@ -12,18 +12,18 @@ const stripe = require('stripe')(functions.config().stripe.secret, {
   apiVersion: '2020-03-02',
 });
 
+
 admin.initializeApp();
 
 /** STRIPE */
 
 // Keeps track of the length of the 'likes' child list in a separate property.
-// TODO: Remeber to get IP Address.
-
 
 exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}').onCreate(async (snap, context) => {
 
-  const { first_name, last_name, email_address, dob,
-     city, line1, postal_code, state, phone } = snap.data();
+  const { first_name, last_name, email_address, ssn_last_4, dob,
+     city, line1, postal_code, state, phone, ip, } = snap.data();
+  const userId = context.params.userId;
 
   try {
     const account = await stripe.accounts.create({
@@ -35,6 +35,7 @@ exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}')
         email: email_address,
         first_name: first_name, 
         last_name: last_name,
+        ssn_last_4: ssn_last_4,
         phone: phone, 
         address: {
           city: city,
@@ -50,16 +51,21 @@ exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}')
           year: dob[2]
         },
       }, 
+      business_profile: {
+        mcc: "5734",
+        url: "https://instagram.com/lidora",
+        product_description: "Product description",
+      },
       capabilities: {
         card_payments: {requested: true},
         transfers: {requested: true},
       },
       tos_acceptance: {
         date: Math.floor(Date.now() / 1000),
-        ip: '73.125.224.214',
+        ip: ip,
       },
     });
-    await snap.ref.collection('stripe').doc('account').set({account_id: account.id}, { merge: true}); 
+    await snap.ref.set({account_id: account.id}, { merge: true}); 
     return; 
    } catch (error) { 
     await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
@@ -86,12 +92,11 @@ try {
   await snap.ref.set(bankAccount);
   return;
 } catch (error) {
-  console.log(userFacingMessage(error));
-  await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
-  await reportError(error, { user: context.params.userId });
-}
+    console.log(userFacingMessage(error));
+    await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
+    await reportError(error, { user: context.params.userId });
+  }
 });
-
 
 
 exports.createStripeCustomer = functions.auth.user().onCreate(async (user) => {
@@ -99,6 +104,7 @@ exports.createStripeCustomer = functions.auth.user().onCreate(async (user) => {
   const intent = await stripe.setupIntents.create({
     customer: customer.id,
   });
+
   await admin.firestore().collection('customers').doc(user.uid).set({
     customer_id: customer.id,
     setup_secret: intent.client_secret,
@@ -116,8 +122,7 @@ exports.addPaymentMethodDetails = functions.firestore
   .document('/customers/{userId}/payment_methods/{pushId}')
   .onCreate(async (snap, context) => {
     try {
-      const paymentMethodId = snap.data().id;
-      console.log("ID: ", snap.data().id);
+      const paymentMethodId = context.params.pushId;
       const paymentMethod = await stripe.paymentMethods.retrieve(
         paymentMethodId
       );
@@ -210,7 +215,6 @@ exports.confirmStripePayment = functions.firestore
       change.after.ref.set(payment);
     }
   });
-
 
   /**
  * When a user deletes their account, clean up after them
