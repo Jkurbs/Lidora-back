@@ -14,11 +14,10 @@ const stripe = require('stripe')(functions.config().stripe.secret, {
 
 admin.initializeApp();
 
-
 /** STRIPE */
 
 // Keeps track of the length of the 'likes' child list in a separate property.
-// TODO: Remeber to get ADDRESS and DOB from backend.
+// TODO: Remeber to get IP Address.
 
 
 exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}').onCreate(async (snap, context) => {
@@ -61,26 +60,38 @@ exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}')
       },
     });
     await snap.ref.collection('stripe').doc('account').set({account_id: account.id}, { merge: true}); 
+    return; 
    } catch (error) { 
     await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
     await reportError(error, { user: context.params.userId });
    }
 });
 
+// Card needs to be a Debit card, not a credit card
 
-// exports.createExternalAccount = functions.auth.user().onCreate(async (user) => {
+exports.createExternalAccount = functions.firestore
+.document('/chefs/{userId}/external_accounts/{token}')
+.onCreate(async (snap, context) => {
+  const userId = context.params.userId; 
+  const token = context.params.token; 
+  const accountRef = admin.firestore().collection("chefs");
+  const account_id = (await accountRef.doc(userId).get()).data().account_id;
+try {
+  const bankAccount = await stripe.accounts.createExternalAccount(
+    account_id,
+    {
+      external_account: token,
+    }
+  );
+  await snap.ref.set(bankAccount);
+  return;
+} catch (error) {
+  console.log(userFacingMessage(error));
+  await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
+  await reportError(error, { user: context.params.userId });
+}
+});
 
-
-
-// }
-
-
-    // const bankAccount = await stripe.accounts.createExternalAccount(
-    //   account.id,
-    //   {
-    //     external_account: 'btok_1HMxViLjpR7kl7iGMwPfsDaR',
-    //   }
-    // );
 
 
 exports.createStripeCustomer = functions.auth.user().onCreate(async (user) => {
@@ -91,6 +102,7 @@ exports.createStripeCustomer = functions.auth.user().onCreate(async (user) => {
   await admin.firestore().collection('customers').doc(user.uid).set({
     customer_id: customer.id,
     setup_secret: intent.client_secret,
+    email_address: user.email
   });
   return;
 });
@@ -105,6 +117,7 @@ exports.addPaymentMethodDetails = functions.firestore
   .onCreate(async (snap, context) => {
     try {
       const paymentMethodId = snap.data().id;
+      console.log("ID: ", snap.data().id);
       const paymentMethod = await stripe.paymentMethods.retrieve(
         paymentMethodId
       );
@@ -128,30 +141,45 @@ exports.addPaymentMethodDetails = functions.firestore
 
 
 
-
   // [START chargecustomer]
 
 exports.createStripePayment = functions.firestore
-.document('customers/{userId}/payments/{pushId}')
-.onCreate(async (snap, context) => {
-  const { amount, currency, payment_method } = snap.data();
+.document('customers/{userId}/payments/{pushId}').onCreate(async (snap, context) => {
+  const { amount, currency, payment_method, destination } = snap.data();
   try {
     // Look up the Stripe customer id.
+    const dbRef = admin.firestore().collection('customers');
     const customer = (await snap.ref.parent.parent.get()).data().customer_id;
+    const receipt_email = (await dbRef.doc(userId).get()).data().email_address;
+
+    const userId = context.params.userId; 
+
     // Create a charge using the pushId as the idempotency key
     // to protect against double charges.
     const idempotencyKey = context.params.pushId;
+
     const payment = await stripe.paymentIntents.create(
       {
-        amount,
-        currency,
+        payment_method_data: {
+          type: 'card',  
+          card: {
+            token: payment_method,
+          }
+        }, 
         customer,
-        payment_method,
+        amount: amount,
+        currency: currency,
         off_session: false,
         confirm: true,
-        confirmation_method: 'manual',
+        receipt_email: receipt_email,
+        application_fee_amount: amount/10,
+        transfer_data: {
+          destination: destination,
+        },
       },
-      { idempotencyKey }
+      { 
+        idempotencyKey,
+       }
     );
     // If the result is successful, write it back to the database.
     await snap.ref.set(payment);
@@ -170,7 +198,6 @@ exports.createStripePayment = functions.firestore
  * When 3D Secure is performed, we need to reconfirm the payment
  * after authentication has been performed.
  *
- * @see https://stripe.com/docs/payments/accept-a-payment-synchronously#web-confirm-payment
  */
 
 exports.confirmStripePayment = functions.firestore
