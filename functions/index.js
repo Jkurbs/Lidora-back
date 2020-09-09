@@ -21,8 +21,8 @@ admin.initializeApp();
 
 exports.createConnectedAccount = functions.firestore.document('/chefs/{userId}').onCreate(async (snap, context) => {
 
-  const { first_name, last_name, email_address, ssn_last_4, dob,
-     city, line1, postal_code, state, phone, ip, } = snap.data();
+  const { first_name, last_name, email_address, phone, dob, ssn_last_4,
+     city, line1, postal_code, state, ip} = snap.data();
   const userId = context.params.userId;
 
   try {
@@ -114,6 +114,27 @@ exports.createStripeCustomer = functions.auth.user().onCreate(async (user) => {
 });
 
 
+exports.createPaymentMethod = functions.firestore
+  .document('/customers/{userId}/payment_methods/{pushId}')
+  .onCreate(async (snap, context) => {
+    try {
+      const paymentMethodId = context.params.pushId;
+      const customer = (await snap.ref.parent.parent.get()).data().customer_id;
+      console.log("CUSTOMER: ", customer);
+      await stripe.paymentMethods.attach(
+        paymentMethodId,
+        {customer: customer}
+      );
+      await stripe.customers.update({
+        customer,
+      });
+      return;
+    } catch (error) {
+      await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
+      await reportError(error, { user: context.params.userId });
+    }
+  });
+
 /**
  * When adding the payment method ID on the client,
  * this function is triggered to retrieve the payment method details.
@@ -122,14 +143,16 @@ exports.addPaymentMethodDetails = functions.firestore
   .document('/customers/{userId}/payment_methods/{pushId}')
   .onCreate(async (snap, context) => {
     try {
-      const paymentMethodId = context.params.pushId;
+      const paymentMethodId = snap.data().stripeId;
+      const customer = (await snap.ref.parent.parent.get()).data().customer_id;
+
       const paymentMethod = await stripe.paymentMethods.retrieve(
-        paymentMethodId
+        paymentMethodId, 
       );
       await snap.ref.set(paymentMethod);
       // Create a new SetupIntent so the customer can add a new method next time.
       const intent = await stripe.setupIntents.create({
-        customer: paymentMethod.customer,
+        customer: customer,
       });
       await snap.ref.parent.parent.set(
         {
@@ -171,7 +194,7 @@ exports.createStripePayment = functions.firestore
             token: payment_method,
           }
         }, 
-        customer,
+        customer: customer,
         amount: amount,
         currency: currency,
         off_session: false,
