@@ -120,14 +120,11 @@ exports.createPaymentMethod = functions.firestore
     try {
       const paymentMethodId = context.params.pushId;
       const customer = (await snap.ref.parent.parent.get()).data().customer_id;
-      console.log("CUSTOMER: ", customer);
       await stripe.paymentMethods.attach(
-        paymentMethodId,
-        {customer: customer}
+        paymentMethodId, {
+          customer: customer,
+        }
       );
-      await stripe.customers.update({
-        customer,
-      });
       return;
     } catch (error) {
       await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
@@ -143,13 +140,18 @@ exports.addPaymentMethodDetails = functions.firestore
   .document('/customers/{userId}/payment_methods/{pushId}')
   .onCreate(async (snap, context) => {
     try {
-      const paymentMethodId = snap.data().stripeId;
+      const paymentMethodId = snap.data().id;
       const customer = (await snap.ref.parent.parent.get()).data().customer_id;
 
       const paymentMethod = await stripe.paymentMethods.retrieve(
         paymentMethodId, 
       );
-      await snap.ref.set(paymentMethod);
+      await snap.ref.set({ 
+        brand: paymentMethod.card.brand, 
+        last4: paymentMethod.card.last4, 
+        month: paymentMethod.card.exp_month, 
+        year:  paymentMethod.card.exp_year
+       }, { merge: true });
       // Create a new SetupIntent so the customer can add a new method next time.
       const intent = await stripe.setupIntents.create({
         customer: customer,
