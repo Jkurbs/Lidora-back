@@ -114,7 +114,7 @@ exports.createStripeCustomer = functions.auth.user().onCreate(async (user) => {
 });
 
 
-exports.createPaymentMethod = functions.firestore
+exports.attachPaymentMethod = functions.firestore
   .document('/customers/{userId}/payment_methods/{pushId}')
   .onCreate(async (snap, context) => {
     try {
@@ -126,6 +126,21 @@ exports.createPaymentMethod = functions.firestore
         }
       );
       return;
+    } catch (error) {
+      await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
+      await reportError(error, { user: context.params.userId });
+    }
+  });
+
+  exports.detachPaymentMethod = functions.firestore
+  .document('/customers/{userId}/payment_methods/{pushId}')
+  .onDelete(async (snap, context) => {
+    try {
+      const paymentMethodId = context.params.pushId;
+      const paymentMethod = await stripe.paymentMethods.detach(
+        paymentMethodId, 
+      );
+      return; 
     } catch (error) {
       await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
       await reportError(error, { user: context.params.userId });
