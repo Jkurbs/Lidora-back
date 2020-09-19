@@ -105,10 +105,13 @@ exports.createStripeCustomer = functions.auth.user().onCreate(async (user) => {
     customer: customer.id,
   });
 
+  const res = await admin.firestore().collection('customers').doc(user.uid).collection("orders").doc();
+
   await admin.firestore().collection('customers').doc(user.uid).set({
     customer_id: customer.id,
     setup_secret: intent.client_secret,
-    email_address: user.email
+    email_address: user.email, 
+    order_id: res.id
   });
   return;
 });
@@ -125,6 +128,7 @@ exports.attachPaymentMethod = functions.firestore
           customer: customer,
         }
       );
+      await snap.ref.parent.parent.set({ primary_card: paymentMethodId}, { merge: true });
       return;
     } catch (error) {
       await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
@@ -165,7 +169,8 @@ exports.addPaymentMethodDetails = functions.firestore
         brand: paymentMethod.card.brand, 
         last4: paymentMethod.card.last4, 
         month: paymentMethod.card.exp_month, 
-        year:  paymentMethod.card.exp_year
+        year:  paymentMethod.card.exp_year,
+        primary: true, 
        }, { merge: true });
       // Create a new SetupIntent so the customer can add a new method next time.
       const intent = await stripe.setupIntents.create({
@@ -184,8 +189,6 @@ exports.addPaymentMethodDetails = functions.firestore
     }
   });
 
-
-
   // [START chargecustomer]
 
 exports.createStripePayment = functions.firestore
@@ -193,15 +196,20 @@ exports.createStripePayment = functions.firestore
   const { amount, currency, payment_method, destination } = snap.data();
   try {
     // Look up the Stripe customer id.
+    const userId = context.params.userId; 
     const dbRef = admin.firestore().collection('customers');
     const customer = (await snap.ref.parent.parent.get()).data().customer_id;
     const receipt_email = (await dbRef.doc(userId).get()).data().email_address;
 
-    const userId = context.params.userId; 
-
     // Create a charge using the pushId as the idempotency key
     // to protect against double charges.
     const idempotencyKey = context.params.pushId;
+    const roundedAmount = amount * 100
+    const fee = amount / 10
+    const transferAmount = Math.round(((amount - fee) * 100));
+    console.log("FEE", transferAmount);
+    console.log("REEIPT EMAIL:", transferAmount);
+
 
     const payment = await stripe.paymentIntents.create(
       {
@@ -212,14 +220,14 @@ exports.createStripePayment = functions.firestore
           }
         }, 
         customer: customer,
-        amount: amount,
+        amount: roundedAmount,
         currency: currency,
         off_session: false,
         confirm: true,
-        receipt_email: receipt_email,
-        application_fee_amount: amount/10,
+        receipt_email: "kurbs@gmail.com",
         transfer_data: {
-          destination: destination,
+          amount: transferAmount,
+          destination: "acct_1HMaiNGAaZwhOLs7",
         },
       },
       { 
@@ -228,6 +236,7 @@ exports.createStripePayment = functions.firestore
     );
     // If the result is successful, write it back to the database.
     await snap.ref.set(payment);
+    return;
   } catch (error) {
     // We want to capture errors and render them in a user-friendly way, while
     // still logging an exception with StackDriver
@@ -252,9 +261,13 @@ exports.confirmStripePayment = functions.firestore
       const payment = await stripe.paymentIntents.confirm(
         change.after.data().id
       );
-      change.after.ref.set(payment);
+      change.after.ref.set(payment)
+      ;
     }
   });
+
+  // [START Creating transfer
+
 
   /**
  * When a user deletes their account, clean up after them
