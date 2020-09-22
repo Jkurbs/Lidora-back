@@ -150,6 +150,32 @@ exports.attachPaymentMethod = functions.firestore
       await reportError(error, { user: context.params.userId });
     }
   });
+  
+
+  exports.updateDefaultPaymentMethod = functions.firestore
+  .document('/customers/{userId}/payment_methods/{pushId}')
+  .onUpdate(async (snap, context) => {
+    
+    try {
+ 
+      const paymentMethodId = context.params.pushId;
+      const customerId = (await snap.after.ref.parent.parent.get()).data().customer_id;
+      const primary = snap.after.data().primary; 
+      
+      if (primary === true) {
+        const customer = await stripe.customers.update(customerId, {
+          invoice_settings: {
+            default_payment_method: paymentMethodId,
+          },
+        });
+      }
+      return;
+    } catch (error) {
+      console.log("Error: ", error);
+     await snap.after.ref.set({ error: userFacingMessage(error) }, { merge: true });
+      await reportError(error, { user: context.params.userId });
+    }
+  });
 
 /**
  * When adding the payment method ID on the client,
@@ -193,7 +219,7 @@ exports.addPaymentMethodDetails = functions.firestore
 
 exports.createStripePayment = functions.firestore
 .document('customers/{userId}/payments/{pushId}').onCreate(async (snap, context) => {
-  const { amount, currency, payment_method, destination } = snap.data();
+  const { subtotal, total, currency, payment_method, destination } = snap.data();
   try {
     // Look up the Stripe customer id.
     const userId = context.params.userId; 
@@ -204,12 +230,8 @@ exports.createStripePayment = functions.firestore
     // Create a charge using the pushId as the idempotency key
     // to protect against double charges.
     const idempotencyKey = context.params.pushId;
-    const roundedAmount = amount * 100
-    const fee = amount / 10
-    const transferAmount = Math.round(((amount - fee) * 100));
-    console.log("FEE", transferAmount);
-    console.log("REEIPT EMAIL:", transferAmount);
-
+    const roundSubtotal =  Math.round(subtotal * 100);
+    const roundtotal =  Math.round(total * 100);
 
     const payment = await stripe.paymentIntents.create(
       {
@@ -220,13 +242,13 @@ exports.createStripePayment = functions.firestore
           }
         }, 
         customer: customer,
-        amount: roundedAmount,
+        amount: roundtotal,
         currency: currency,
         off_session: false,
         confirm: true,
-        receipt_email: "kurbs@gmail.com",
+        receipt_email: receipt_email,
         transfer_data: {
-          amount: transferAmount,
+          amount: roundSubtotal,
           destination: "acct_1HMaiNGAaZwhOLs7",
         },
       },
