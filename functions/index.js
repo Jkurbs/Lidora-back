@@ -152,29 +152,56 @@ exports.attachPaymentMethod = functions.firestore
   });
   
 
+  exports.updatePaymentMethod = functions.firestore
+  .document('/customers/{userId}/payment_methods/{pushId}')
+  .onUpdate(async (snap, context) => {
+     try {
+ 
+      const paymentMethodId = context.params.pushId;
+
+      const old_exp_month = snap.before.data().month;
+      const old_exp_year = snap.before.data().year; 
+      const exp_month = snap.after.data().month; 
+      const exp_year = snap.after.data().year; 
+
+      if (old_exp_month !== exp_month || old_exp_year !== exp_year) {
+        const paymentMethod = await stripe.paymentMethods.update(paymentMethodId, 
+          {
+          card: {
+            exp_month: exp_month, 
+            exp_year: exp_year, 
+          }
+         });
+        console.log("PAYMENT METHOD: ", paymentMethod);
+      }
+      return;
+     } catch (error) {
+      await snap.after.ref.set({ error: userFacingMessage(error) }, { merge: true });
+      await reportError(error, { user: context.params.userId });
+    }
+  }); 
+
   exports.updateDefaultPaymentMethod = functions.firestore
   .document('/customers/{userId}/payment_methods/{pushId}')
   .onUpdate(async (snap, context) => {
-    
-    try {
- 
-      const paymentMethodId = context.params.pushId;
-      const customerId = (await snap.after.ref.parent.parent.get()).data().customer_id;
-      const primary = snap.after.data().primary; 
-      
-      if (primary === true) {
-        const customer = await stripe.customers.update(customerId, {
-          invoice_settings: {
-            default_payment_method: paymentMethodId,
-          },
-        });
+    const before_primary = snap.after.data().primary; 
+    const primary = snap.after.data().primary; 
+    if (before_primary !== primary && primary === true) {
+      try {
+        const paymentMethodId = context.params.pushId;
+        const customerId = (await snap.after.ref.parent.parent.get()).data().customer_id;
+  
+          const customer = await stripe.customers.update(customerId, {
+            invoice_settings: {
+              default_payment_method: paymentMethodId,
+            },
+          });
+        return;
+      } catch (error) {
+        await snap.after.ref.set({ error: userFacingMessage(error) }, { merge: true });
+        await reportError(error, { user: context.params.userId });
       }
-      return;
-    } catch (error) {
-      console.log("Error: ", error);
-     await snap.after.ref.set({ error: userFacingMessage(error) }, { merge: true });
-      await reportError(error, { user: context.params.userId });
-    }
+    } 
   });
 
 /**
@@ -225,6 +252,7 @@ exports.createStripePayment = functions.firestore
     const userId = context.params.userId; 
     const dbRef = admin.firestore().collection('customers');
     const customer = (await snap.ref.parent.parent.get()).data().customer_id;
+    const orderId = (await snap.ref.parent.parent.get()).data().order_id;
     const receipt_email = (await dbRef.doc(userId).get()).data().email_address;
 
     // Create a charge using the pushId as the idempotency key
@@ -256,7 +284,10 @@ exports.createStripePayment = functions.firestore
         idempotencyKey,
        }
     );
-    // If the result is successful, write it back to the database.
+    // If the result is successful, delete order and write payment back to the database.
+
+    await admin.firestore().collection("customers").doc(userId).collection("orders").doc(orderId).delete();
+    await deleteCollection(admin.firestore(), userId, orderId, 10); 
     await snap.ref.set(payment);
     return;
   } catch (error) {
@@ -267,6 +298,41 @@ exports.createStripePayment = functions.firestore
     await reportError(error, { user: context.params.userId });
   }
 });
+
+async function deleteCollection(db, userId, orderId, batchSize) {
+
+  const collectionRef = db.collection("customers").doc(userId).collection("orders").doc(orderId).collection("items");
+
+  const query = collectionRef.limit(batchSize);
+
+  return new Promise((resolve, reject) => {
+    deleteQueryBatch(db, query, resolve).catch(reject);
+  });
+}
+
+async function deleteQueryBatch(db, query, resolve) {
+  const snapshot = await query.get();
+
+  const batchSize = snapshot.size;
+  if (batchSize === 0) {
+    // When there are no documents left, we are done
+    resolve();
+    return;
+  }
+
+  // Delete documents in a batch
+  const batch = db.batch();
+  snapshot.docs.forEach((doc) => {
+    batch.delete(doc.ref);
+  });
+  await batch.commit();
+
+  // Recurse on the next process tick, to avoid
+  // exploding the stack.
+  process.nextTick(() => {
+    deleteQueryBatch(db, query, resolve);
+  });
+}
 
 // [END chargecustomer]
 
