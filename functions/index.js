@@ -22,7 +22,6 @@ const stripe = require('stripe')(functions.config().stripe.secret, {
   apiVersion: '2020-03-02',
 });
 
-
 admin.initializeApp();
 
 /** STRIPE */
@@ -89,14 +88,14 @@ exports.createExternalAccount = functions.firestore
   .document('/chefs/{userId}/external_accounts/{token}')
   .onCreate(async (snap, context) => {
     const userId = context.params.userId;
-    const token = context.params.token;
+    const token = snap.data().token;
     const accountRef = admin.firestore().collection("chefs");
     const account_id = (await accountRef.doc(userId).get()).data().account_id;
     try {
       const bankAccount = await stripe.accounts.createExternalAccount(
         account_id,
         {
-          external_account: token,
+          external_account: token
         }
       );
       await snap.ref.set(bankAccount);
@@ -253,6 +252,46 @@ exports.addPaymentMethodDetails = functions.firestore
 
 // [START chargecustomer]
 
+
+exports.createStripeAnonymousPayment = functions.firestore.document('/payments/{id}').onCreate(async (snap, context) => {
+    const { chefId, allergies, email, phone, address, subtotal, total, serviceFee, deliveryFee, quantity, currency, payment_method, destination } = snap.data();
+
+    try {
+      const idempotencyKey = context.params.pushId;
+      const payment = await stripe.paymentIntents.create(
+        {
+          payment_method_data: {
+            type: 'card',
+            card: {
+              token: payment_method,
+            }
+          },
+          amount: total,
+          currency: currency,
+          off_session: false,
+          confirm: true,
+          receipt_email: email,
+          transfer_data: {
+            amount: subtotal,
+            destination: destination,
+          },
+        },
+        {
+          idempotencyKey,
+        }
+      );
+
+      await snap.ref.set(payment, { merge: true });
+      await snap.ref.set({chefId: chefId}, { merge: true });
+      return;
+    } catch (error) {
+        console.log(error);
+        await snap.ref.set({ error: userFacingMessage(error) }, { merge: true });
+        await reportError(error, { user: context.params.id });
+      }
+  });
+
+
 exports.createStripePayment = functions.firestore
   .document('/customers/{userId}/payments/{pushId}').onCreate(async (snap, context) => {
     const { subtotal, total, currency, payment_method, destination } = snap.data();
@@ -334,29 +373,78 @@ exports.createStripePayment = functions.firestore
  *
  */
 
+exports.confirmStripeAnonymousPayment = functions.firestore
+.document('payments/{id}')
+.onUpdate(async (change, context) => {
+  const chefId = change.after.data().chefId;
+  const status = change.after.data().status;
+  var payment;
+  if (status === 'requires_confirmation') {
+    payment = await stripe.paymentIntents.confirm(
+      change.after.data().id
+    );
+    change.after.ref.set(payment)
+    ;
+  } else if (status === 'succeeded') {
+    // Send orders to Chefs, Send emails and 
+
+     // Move this to confirmation
+     const ordersRef = await admin.firestore().collection('chefs').doc(chefId).collection("orders").doc()
+     await ordersRef.set({ 
+       subtotal: payment.transfer_data.amount,
+       total: payment.total,
+       // quantity: quantity,
+       // delivery_fee: deliveryFee,
+       // service_fee: serviceFee
+     })
+
+      // const mailOptions = {
+      //   from: gmailEmail,
+      //   to: payment.receipt_email,
+      // };
+      // // Building Email message.
+      // mailOptions.subject = 'Your receipt'
+      // mailOptions.text = 'This is your receipt'
+      // try {
+      //   await mailTransport.sendMail(mailOptions);
+      //   console.log("A possible chef has signup", email_address);
+      //   return;
+      // } catch (error) {
+      //   console.error('There was an error while sending the email:', error);
+      // }
+  }
+});
+
 exports.confirmStripePayment = functions.firestore
   .document('/customers/{userId}/payments/{pushId}')
   .onUpdate(async (change, context) => {
     const status = change.after.data().status;
+    var payment;
     if (status === 'requires_confirmation') {
-      const payment = await stripe.paymentIntents.confirm(
+      payment = await stripe.paymentIntents.confirm(
         change.after.data().id
       );
       change.after.ref.set(payment)
-        ;
+      ;
     } else if (status === 'succeeded') {
-      const payload = {
-        notification: {
-          title: 'You have a new order',
-          body: 'Congrats a new order have been placed',
-        }
+      // Send emails  
+
+      const mailOptions = {
+        from: gmailEmail,
+        to: payment.receipt_email,
       };
-      return admin.messaging().sendToDevice(deviceToken, payload);
+      // Building Email message.
+      mailOptions.subject = 'Your receipt'
+      mailOptions.text = 'This is your receipt'
+      try {
+        await mailTransport.sendMail(mailOptions);
+        console.log("A possible chef has signup", email_address);
+        return;
+      } catch (error) {
+        console.error('There was an error while sending the email:', error);
+      }
     }
   });
-
-// [START Creating transfer
-
 
 /**
 * When a user deletes their account, clean up after them
@@ -415,6 +503,30 @@ exports.sendPossibleCustomerEmail = functions.firestore
       console.error('There was an error while sending the email:', error);
     }
   });
+
+
+
+// Handle ticket coming from chef 
+
+// exports.handleTicketFromChef = functions.firestore
+//   .document('/chefs/{id}/tickets').onCreate(async (snap, context) => {
+//     const { email_address } = snap.data();
+
+//     const mailOptions = {
+//       from: gmailEmail,
+//       to: 'kerby.jean@hotmail.fr',
+//     };
+//     // Building Email message.
+//     mailOptions.subject = 'New potential user!'
+//     mailOptions.text = email_address;
+//     try {
+//       await mailTransport.sendMail(mailOptions);
+//       console.log("A possible chef has signup", email_address);
+//       return;
+//     } catch (error) {
+//       console.error('There was an error while sending the email:', error);
+//     }
+//   });
 
 
 
