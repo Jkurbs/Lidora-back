@@ -379,6 +379,7 @@ exports.confirmStripeAnonymousPayment = functions.firestore
   const chefId = change.after.data().chefId;
   const status = change.after.data().status;
   var payment;
+  console.log(chefId,"CONFIRMPAY")
   if (status === 'requires_confirmation') {
     payment = await stripe.paymentIntents.confirm(
       change.after.data().id
@@ -398,20 +399,20 @@ exports.confirmStripeAnonymousPayment = functions.firestore
        // service_fee: serviceFee
      })
 
-      // const mailOptions = {
-      //   from: gmailEmail,
-      //   to: payment.receipt_email,
-      // };
-      // // Building Email message.
-      // mailOptions.subject = 'Your receipt'
-      // mailOptions.text = 'This is your receipt'
-      // try {
-      //   await mailTransport.sendMail(mailOptions);
-      //   console.log("A possible chef has signup", email_address);
-      //   return;
-      // } catch (error) {
-      //   console.error('There was an error while sending the email:', error);
-      // }
+      const mailOptions = {
+        from: gmailEmail,
+        to: payment.receipt_email,
+      };
+      // Building Email message.
+      mailOptions.subject = 'Your receipt'
+      mailOptions.text = 'This is your receipt'
+      try {
+        await mailTransport.sendMail(mailOptions);
+        console.log("A possible chef has signup", email_address);
+        return;
+      } catch (error) {
+        console.error('There was an error while sending the email:', error);
+      }
   }
 });
 
