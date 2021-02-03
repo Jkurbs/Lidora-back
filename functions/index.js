@@ -374,7 +374,7 @@ exports.createStripePayment = functions.firestore
  */
 
 exports.confirmStripeAnonymousPayment = functions.firestore
-.document('payments/{id}')
+.document('/payments/{id}')
 .onUpdate(async (change, context) => {
   const chefId = change.after.data().chefId;
   const status = change.after.data().status;
@@ -388,14 +388,19 @@ exports.confirmStripeAnonymousPayment = functions.firestore
     change.after.ref.set(payment)
     ;
     console.log(payment,"PAYMENTDATAREQCONFIRM")
-  } else if (status === 'succeeded') {
+  }
+  else if (status === 'error') {
+    console.log("ConfirmStripeAnonPayment Status == error")
+  }
+  else if (status === 'succeeded') {
     // Send orders to Chefs, Send emails and 
     console.log(payment,"PAYMENTDATASUCCEED")
+    console.log(change.after.data(),"ChangeDataSucceed")
      // Move this to confirmation
      const ordersRef = await admin.firestore().collection('chefs').doc(chefId).collection("orders").doc()
      await ordersRef.set({ 
-       subtotal: payment.transfer_data.amount,
-       total: payment.total,
+       subtotal: change.after.data().transfer_data.amount,
+       total: change.after.data().total,
        // quantity: quantity,
        // delivery_fee: deliveryFee,
        // service_fee: serviceFee
@@ -403,7 +408,7 @@ exports.confirmStripeAnonymousPayment = functions.firestore
 
       const mailOptions = {
         from: gmailEmail,
-        to: payment.receipt_email,
+        to: change.after.data().email,
       };
       // Building Email message.
       mailOptions.subject = 'Your receipt'
