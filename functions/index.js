@@ -407,6 +407,7 @@ exports.confirmStripeAnonymousPayment = functions.firestore
        delivery_fee: change.after.data().deliveryFee,
        service_fee: change.after.data().serviceFee,
        timestamp: Date.now(),
+       allergies: change.after.data().allergies,
        items: change.after.data().items
      })
 
