@@ -403,9 +403,11 @@ exports.confirmStripeAnonymousPayment = functions.firestore
      await ordersRef.set({ 
        subtotal: change.after.data().transfer_data.amount,
        total: change.after.data().total,
-       // quantity: quantity,
-       // delivery_fee: deliveryFee,
-       // service_fee: serviceFee
+       quantity: change.after.data().quantity,
+       delivery_fee: change.after.data().deliveryFee,
+       service_fee: change.after.data().serviceFee,
+       timestamp: Date.now(),
+       items: change.after.data().items
      })
 
       const mailOptions = {
