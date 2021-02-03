@@ -379,16 +379,18 @@ exports.confirmStripeAnonymousPayment = functions.firestore
   const chefId = change.after.data().chefId;
   const status = change.after.data().status;
   var payment;
-  console.log(chefId,"CONFIRMPAY")
+  console.log(change.after.data().status,"STATUS")
+  console.log(status)
   if (status === 'requires_confirmation') {
     payment = await stripe.paymentIntents.confirm(
       change.after.data().id
     );
     change.after.ref.set(payment)
     ;
+    console.log(payment,"PAYMENTDATAREQCONFIRM")
   } else if (status === 'succeeded') {
     // Send orders to Chefs, Send emails and 
-
+    console.log(payment,"PAYMENTDATASUCCEED")
      // Move this to confirmation
      const ordersRef = await admin.firestore().collection('chefs').doc(chefId).collection("orders").doc()
      await ordersRef.set({ 
