@@ -379,15 +379,17 @@ exports.confirmStripeAnonymousPayment = functions.firestore
   const chefId = change.after.data().chefId;
   const status = change.after.data().status;
   var payment;
-  console.log(change.after.data().status,"STATUS")
+  console.log(change.after.data().status,"STATUSBEFOREIFELSE")
   console.log(status)
   if (status === 'requires_confirmation') {
+    console.log("CONFIRMSTRIPEANON REQUIRES CONFIRMATION")
+    console.log(payment,"PAYMENTDATAREQCONFIRM")
     payment = await stripe.paymentIntents.confirm(
       change.after.data().id
     );
     change.after.ref.set(payment)
     ;
-    console.log(payment,"PAYMENTDATAREQCONFIRM")
+    
   }
   else if (status === 'error') {
     console.log("ConfirmStripeAnonPayment Status == error")
