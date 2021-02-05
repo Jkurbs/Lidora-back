@@ -399,7 +399,19 @@ exports.confirmStripeAnonymousPayment = functions.firestore
     console.log(payment,"PAYMENTDATASUCCEED")
     console.log(change.after.data(),"ChangeDataSucceed")
      // Move this to confirmation
-     const ordersRef = await admin.firestore().collection('chefs').doc(chefId).collection("orders").doc()
+
+    //Gets the order's items
+    paymentRef = admin.firestore().collection(payments).doc(context.params.id).collection(items)
+    const snapshot = await paymentRef
+    .get();
+      snapshot.forEach((snap) => {snap.data()
+       console.log("SNAPDATa1",snap.data())
+      });
+      console.log("SNAPDATa2",snap.data())
+      console.log("SNAPshotdata2start",snapshot,"snapshotdata2end")
+
+     //Sets the payment info
+     const ordersRef = await admin.firestore().collection('chefs').doc(chefId).collection("orders").doc(context.params.id)
      await ordersRef.set({ 
        subtotal: change.after.data().transfer_data.amount,
        total: change.after.data().total,
@@ -411,6 +423,13 @@ exports.confirmStripeAnonymousPayment = functions.firestore
        items: change.after.data().items
      })
 
+     //Add Order details to a collection
+     await ordersRef.collection.add({
+       item:"TestAddtoCollection"
+     })
+
+
+     //mail Options
       const mailOptions = {
         from: gmailEmail,
         to: change.after.data().email,
