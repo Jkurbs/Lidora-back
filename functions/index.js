@@ -421,10 +421,27 @@ exports.confirmStripeAnonymousPayment = functions.firestore
        allergies: change.after.data().allergies,
      })
 
-     //Add Order details to a collection
-     await ordersRef.collection('items').add({
-       item:items
-     })
+     //Creates documents for each item in order collection "items"
+    //  items.forEach((item) =>{
+    //   await ordersRef.collection('items').add({
+    //     item:item
+    //   })
+    //  })
+     items.forEach(async (item) => { 
+      ordersRef.collection("items").doc().set({
+        categoryName: item.categoryName,
+        comboName:item.comboName,
+        deliveryDates:item.deliveryDates,
+        description:item.description ,
+        imageURL: item.imageURL,
+        key: item.key,
+        name: item.name,
+        price:item.price,
+        quantity:item.quantity,
+        total: item.total,
+    })
+  })
+
 
 
      //mail Options
