@@ -401,13 +401,12 @@ exports.confirmStripeAnonymousPayment = functions.firestore
      // Move this to confirmation
 
     //Gets the order's items
-    paymentRef = admin.firestore().collection(payments).doc(context.params.id).collection(items)
+    const paymentRef = admin.firestore().collection("payments").doc(context.params.id).collection("items")
     const snapshot = await paymentRef
     .get();
       snapshot.forEach((snap) => {snap.data()
        console.log("SNAPDATa1",snap.data())
       });
-      console.log("SNAPDATa2",snap.data())
       console.log("SNAPshotdata2start",snapshot,"snapshotdata2end")
 
      //Sets the payment info
