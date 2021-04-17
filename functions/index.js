@@ -3,9 +3,16 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { Logging } = require('@google-cloud/logging');
 const deviceToken = functions.config().dev_motivator.device_token
+const Handlebars = require("handlebars");
 const nodemailer = require('nodemailer');
+const nodemailerSendgrid = require('nodemailer-sendgrid');
+const sgMail = require('@sendgrid/mail')
+sgMail.setApiKey(functions.config().sendgrid.apikey)
+
 const gmailEmail = functions.config().gmail.email;
 const gmailPassword = functions.config().gmail.password;
+var fs = require('fs');
+
 const mailTransport = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -254,7 +261,9 @@ exports.addPaymentMethodDetails = functions.firestore
 
 
 exports.createStripeAnonymousPayment = functions.firestore.document('/payments/{id}').onCreate(async (snap, context) => {
-    const { chefId, allergies, email, phone, address, subtotal, total, serviceFee, deliveryFee, quantity, currency, payment_method, destination } = snap.data();
+    const { chefId, storeName, email, phone, apt, line1, state, zip, subtotal, total, serviceFee,
+       deliveryFee, quantity, currency, payment_method, destination
+    } = snap.data();
 
     try {
       const idempotencyKey = context.params.pushId;
@@ -271,6 +280,14 @@ exports.createStripeAnonymousPayment = functions.firestore.document('/payments/{
           off_session: false,
           confirm: true,
           receipt_email: email,
+          description: "Order from" + " " + storeName,
+          shipping: {
+
+            // address.line1: line1,
+            //     state: state,
+            //     postal_code: zip, 
+            // },
+          },
           transfer_data: {
             amount: subtotal,
             destination: destination,
@@ -376,39 +393,31 @@ exports.createStripePayment = functions.firestore
 exports.confirmStripeAnonymousPayment = functions.firestore
 .document('/payments/{id}')
 .onUpdate(async (change, context) => {
+
   const chefId = change.after.data().chefId;
+  const chefEmailAddress = change.after.data().chefEmailAddress;
+  const location = change.after.data().location;
+  const data = change.after.data().data;
+  const phone = change.after.data().phone.phoneNumberFormat
+
+  const customerName = change.after.data().customerName;
   const status = change.after.data().status;
   var payment;
-  console.log(change.after.data().status,"STATUSBEFOREIFELSE")
-  console.log(status)
   if (status === 'requires_confirmation') {
-    console.log("CONFIRMSTRIPEANON REQUIRES CONFIRMATION")
-    console.log(payment,"PAYMENTDATAREQCONFIRM")
     payment = await stripe.paymentIntents.confirm(
       change.after.data().id
     );
     change.after.ref.set(payment)
     ;
     
-  }
-  else if (status === 'error') {
-    console.log("ConfirmStripeAnonPayment Status == error")
-  }
-  else if (status === 'succeeded') {
-    // Send orders to Chefs, Send emails and 
-    console.log(payment,"PAYMENTDATASUCCEED")
-    console.log(change.after.data(),"ChangeDataSucceed")
-     // Move this to confirmation
+  } else if (status === 'succeeded') {
 
-    //Gets the order's items
     const items = []
     const paymentRef = admin.firestore().collection("payments").doc(context.params.id).collection("items")
-    const snapshot = await paymentRef
-    .get();
+    const snapshot = await paymentRef.get();
       snapshot.forEach((snap) => {items.push(snap.data())
-      });
-      console.log("SNAPshotdata2start",snapshot,"snapshotdata2end")
-      console.log("ITEMSFROMSNAP",items)
+    });
+      
      //Sets the payment info
      const ordersRef = await admin.firestore().collection('chefs').doc(chefId).collection("orders").doc(context.params.id)
      await ordersRef.set({ 
@@ -420,13 +429,6 @@ exports.confirmStripeAnonymousPayment = functions.firestore
        timestamp: Date.now(),
        allergies: change.after.data().allergies,
      })
-
-     //Creates documents for each item in order collection "items"
-    //  items.forEach((item) =>{
-    //   await ordersRef.collection('items').add({
-    //     item:item
-    //   })
-    //  })
      items.forEach(async (item) => { 
       ordersRef.collection("items").doc().set({
         categoryName: item.categoryName,
@@ -439,28 +441,46 @@ exports.confirmStripeAnonymousPayment = functions.firestore
         price:item.price,
         quantity:item.quantity,
         total: item.total,
-    })
+      })
   })
 
+  const filteredData = data.filter(function(el) { return el.title !== "Payment Details"}); 
 
 
-     //mail Options
-      const mailOptions = {
-        from: gmailEmail,
-        to: change.after.data().email,
-      };
-      // Building Email message.
-      mailOptions.subject = 'Your receipt'
-      mailOptions.text = 'This is your receipt'
-      try {
-        await mailTransport.sendMail(mailOptions);
-        console.log("A possible chef has signup", email_address);
-        return;
-      } catch (error) {
-        console.error('There was an error while sending the email:', error);
-      }
-  }
+  filteredData.forEach(function(obj) {
+    if (obj.title === "Shipping Details") {
+        obj["customerName"] = customerName
+        obj["phone"] = phone
+        obj["info"] = change.after.data().allergies
+        obj["address"] = location
+    } else if (obj.title === "Total") { 
+        obj["subtotal"] = change.after.data().transfer_data.amount/100
+        obj["serviceFee"] = change.after.data().serviceFee
+        obj["total"] = change.after.data().total/100
+    }
 });
+
+  const msg = {
+    //extract the email details
+    to: 'info@chefvickyskitchen.com',
+    from: gmailEmail,
+    subject: 'Sending with SendGrid is Fun',
+    templateId: 'd-ec2c494e1a9d452db5d5e95336ce068d',
+    dynamic_template_data: {
+      name: 'Kerby Jean', 
+      data: filteredData,
+    } 
+  };
+
+  sgMail.send(msg).then(() => {
+      return console.log('Email sent')
+    }).catch((error) => {
+      console.error("Error sending email: ",error.response.body)
+    })
+  }
+})
+
+
 
 exports.confirmStripePayment = functions.firestore
   .document('/customers/{userId}/payments/{pushId}')
@@ -576,6 +596,9 @@ exports.sendPossibleCustomerEmail = functions.firestore
 //   });
 
 
+function sendOrderEmails() {
+
+}
 
 /**
  * To keep on top of errors, we should raise a verbose error report with Stackdriver rather
@@ -631,7 +654,6 @@ function userFacingMessage(error) {
     ? error.message
     : 'An error occurred, developers have been alerted';
 }
-
 
 /** MOTIVATOR */
 

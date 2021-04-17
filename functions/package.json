@@ -15,10 +15,15 @@
   "main": "index.js",
   "dependencies": {
     "@google-cloud/logging": "^9.0.1",
+    "@sendgrid/mail": "^7.4.2",
+    "email-templates": "^8.0.3",
     "firebase-admin": "^9.4.2",
     "firebase-functions": "^3.13.0",
     "hammerjs": "^2.0.8",
+    "handlebars": "^4.7.7",
     "nodemailer": "^6.4.17",
+    "nodemailer-sendgrid": "^1.0.3",
+    "pug": "^3.0.0",
     "stripe": "^8.130.0"
   },
   "devDependencies": {
